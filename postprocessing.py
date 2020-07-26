@@ -2,9 +2,12 @@ import tensorflow as tf
 import numpy as np
 import pointer_net
 from datagenerator import DataGenerator
+from datagenerator import fromindex2vector
+from datagenerator import fromvector2index
 # from UnitGenerator import UnitGenerator
 import time
 import os
+import random
 import win_unicode_console
 win_unicode_console.enable()
 
@@ -80,6 +83,59 @@ def eval(test_data, my_model):
         pred = np.vstack(pred)
         tar = np.vstack(tar)
         return pred, tar
+def local_search(instance, unit, result_opt, wp = 0.87):
+    bid_price = instance[:, -1].reshape(-1)
+    revenue_opt = sum(result_opt * bid_price)
+    result_tmp = result_opt.copy()
+    max_iter = 50000
+    iter_unchange = 0
+    # print('Instance:')
+    # print(instance)
+    # print("Unit:")
+    # print(unit)
+    # print('Result_temp:')
+    # print(result_tmp)
+    for i in range(max_iter):
+        if iter_unchange > 5000:
+            break
+        # assume that the opt is steable
+        bid_empty = np.where(result_tmp == 0)[0]
+        # generate a random key and compare it with wp
+        if np.random.random_sample(1) < wp:
+            # pick a random bid
+            pick_index = random.sample(list(bid_empty), 1)[0]
+            result_tmp[pick_index] = 1
+        else:
+            # pick the bid with the highest price greedily
+            price_tmp = bid_price[bid_empty]
+            pick_index = bid_empty[np.argmax(price_tmp)]
+            result_tmp[pick_index] = 1
+        # how to deal with the conflict
+        while (np.dot(result_tmp.reshape(1,-1), instance[:,:-1])>unit).any():
+            conflict_item = np.where(np.dot(result_tmp.reshape(1,-1),instance[:,:-1])>unit)[1]
+            bid_choose = np.where(result_tmp == 1)[0]
+            bundle_choose = instance[bid_choose, :-1]
+            conflict_bid = np.array([])
+            for item_index in list(conflict_item):
+                # 对每个conlict的item来说
+                conflict_bid = np.append(conflict_bid, np.where(bundle_choose[:, item_index] != 0)[0])
+            conflict_bid = np.unique(conflict_bid).astype(int)
+            conflict_bid_index = bid_choose[conflict_bid]
+            #remove the one with the smallest price
+            price_tmp = bid_price[conflict_bid_index]
+            result_tmp[conflict_bid_index[np.argmin(price_tmp)]]=0
+
+        # decide whether update the optimal result
+        revenue_tmp = sum(result_tmp * bid_price)
+        if revenue_tmp > revenue_opt:
+            revenue_opt = revenue_tmp
+            result_opt = result_tmp.copy()
+            iter_unchange = 0
+        else:
+            iter_unchange = iter_unchange + 1
+
+    return result_opt, revenue_opt
+    pass
 def main():
     test_data = DataGenerator(FLAGS, 'test', 2000, 'single')
 
@@ -95,6 +151,12 @@ def main():
                                             )
 
     pred, tar = eval(test_data, my_model)
+    pred_tmp, tar_tmp = [], []
+    for i in range(pred.shape[0]):
+        pred_tmp.append(pred[i][:FLAGS.max_input_sequence_len])
+        tar_tmp.append(tar[i][:FLAGS.max_input_sequence_len])
+    pred = np.stack(pred_tmp)
+    tar = np.stack(tar_tmp)
     # use the model to predict
     inp = test_data.inputs[:tar.shape[0]]
     u = test_data.units[:tar.shape[0]]
@@ -140,6 +202,25 @@ def main():
     accuracy_check(pred, tar)
     feasible_check(unit_, u)
     gap_check(current_revenue, target_revenue)
-
+    local_p = []
+    local_r = []
+    for i in range(pred.shape[0]):
+        if all(pred[i] == tar[i]):
+            local_p.append(pred[i])
+            local_r.append(current_revenue[i])
+            pass
+        else:
+            instance = inp[i]
+            unit = u[i]
+            result_opt = fromindex2vector(pred[i][:FLAGS.max_input_sequence_len], FLAGS.max_input_sequence_len)
+            result_opt = np.array(result_opt)
+            local_result, local_revenue  = local_search(instance, unit, result_opt, wp = 0.87)
+            local_p.append(local_result)
+            local_r.append(local_revenue)
+        print('___finish___{}___search'.format(i+1))
+    local_p = np.stack(local_p)
+    local_r = np.stack(local_r)
+    accuracy_check(local_p, tar)
+    gap_check(local_r, target_revenue)
 if __name__ == '__main__':
     main()
