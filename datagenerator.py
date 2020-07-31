@@ -1,16 +1,12 @@
 import csv
 
 import tensorflow as tf
-import numpy as np
-import pointer_net
-import gzip
-import pickle
-#
 # tf.app.flags.DEFINE_integer("batch_size", 128,"Batch size.")
-# tf.app.flags.DEFINE_integer("num_item", 5, "The number of the total items.")
+# tf.app.flags.DEFINE_integer("num_item", 50, "The number of the total items.")
+# tf.app.flags.DEFINE_integer("num_bid", 500, "The number of the total bids.")
 # tf.app.flags.DEFINE_integer("unit_max", 5, "The max number of the units of each bid")
-# tf.app.flags.DEFINE_integer("max_input_sequence_len", 10, "Maximum input sequence length.")
-# tf.app.flags.DEFINE_integer("max_output_sequence_len", 11, "Maximum output sequence length.")
+# tf.app.flags.DEFINE_integer("max_input_sequence_len", 2000, "Maximum input sequence length.")
+# tf.app.flags.DEFINE_integer("max_output_sequence_len", 2001, "Maximum output sequence length.")
 # tf.app.flags.DEFINE_integer("rnn_size", 128, "RNN unit size.")
 # tf.app.flags.DEFINE_integer("attention_size", 128, "Attention size.")
 # tf.app.flags.DEFINE_integer("num_layers", 1, "Number of layers.")
@@ -22,8 +18,14 @@ import pickle
 # tf.app.flags.DEFINE_string("data_path", "./data/convex_hull_5_test.txt", "Data path.")
 # tf.app.flags.DEFINE_integer("steps_per_checkpoint", 200, "frequence to do per checkpoint.")
 # tf.app.flags.DEFINE_integer("train_epoch", 150, "The train epochs")
-
+#
 # FLAGS = tf.app.flags.FLAGS
+import numpy as np
+import pointer_net
+import gzip
+import pickle
+
+#
 
 class DataGenerator(object):
     def __init__(self, FLAGS, typestr, data_size, unitstr):
@@ -105,20 +107,33 @@ class DataGenerator(object):
         inputs = []
         enc_input_weights = []
         for i in range(self.data_size):
-            data_path = './data/instance/' + str(self.flag.num_item) + '_' + str(self.flag.max_input_sequence_len) + '/' + \
+            data_path = './data/instance/' + str(self.flag.num_item) + '_' + str(self.flag.num_bid) + '/' + \
                         str(self.flag.unit_max) + '/' + self.typestr + '/binary/instance_' + str(i + 1) + '.txt'
             print("...loading...data" + str(i + 1))
-            with open(data_path, 'r') as file:
-                recs = file.readlines()
-                enc_input = []
-                for rec in recs:
-                    inp = rec[:-2].split(' ')
-                    for t in inp:
-                        enc_input.append(float(t))
-                enc_input = np.array(enc_input).reshape([-1, (self.flag.num_item + 1)])
-                inputs.append(enc_input)
+            instance_matrix = np.loadtxt(data_path)
+            if instance_matrix.shape == (self.flag.max_input_sequence_len, self.flag.num_item + 1):
+                inputs.append(instance_matrix)
                 weight = np.ones(self.flag.max_input_sequence_len)
                 enc_input_weights.append(weight)
+            else:
+                instance_matrix = list(instance_matrix)
+                bids = []
+                for i in instance_matrix:
+                    bid = list(i)
+                    bid_length = len(bid)
+                    bid_pad = bid[:-1] + [float(0)] * (self.flag.num_item + 1 - bid_length) + bid[-1:]
+                    bids.append(bid_pad)
+                enc_bid_length = len(bids)
+                enc_weight = np.zeros(self.flag.max_input_sequence_len)
+                enc_weight[:enc_bid_length] = 1
+                for _ in range(self.flag.max_input_sequence_len - len(bids)):
+                    bid_pad = [float(0)] * (self.flag.num_item + 1)
+                    bids.append(bid_pad)
+                bids = np.array(bids)
+                # print(bids)
+                # print(enc_weight)
+                inputs.append(bids)
+                enc_input_weights.append(enc_weight)
         self.inputs = np.stack(inputs)
         self.enc_input_weights = np.stack(enc_input_weights)
         print("Load input data finished!")
@@ -126,9 +141,8 @@ class DataGenerator(object):
         print("Start loading output data!")
         self.outputs = []
         self.dec_input_weights = []
-        data_path = './results/' + 'eval_' + str(self.flag.num_item) + '_' + str(self.flag.max_input_sequence_len) \
+        data_path = './results/' + 'eval_' + str(self.flag.num_item) + '_' + str(self.flag.num_bid) \
                     + '/cplex_' + self.typestr + '_output.csv'
-
         with open(data_path, 'r') as csvfile:
             reader = csv.reader(csvfile)
             reader = list(reader)
@@ -215,12 +229,17 @@ def fromvector2index(vector):
 def fromindex2vector(index,n):
     vector = [0]*n
     for i in index:
-        vector[i-1] = 1
+        if not i == 0:
+            vector[i-1] = 1
     return vector
 
 def main():
-    train_data = DataGenerator(FLAGS,'test', 20000, 'multi')
-
+    # train_data = DataGenerator(FLAGS,'train', 50995, 'single')
+    train_data = DataGenerator(FLAGS, 'train', 200, 'single')
+    for _ in range(10):
+        print(train_data.outputs[_][:40])
+        print(train_data.dec_input_weights[_][:40])
+    # print(train_data.inputs[1])
 if __name__ == "__main__":
     # tf.app.run()
     main()
