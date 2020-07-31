@@ -81,7 +81,7 @@ class PointerNet(object):
         # [batch_size, ] batch_size长的一个array记录长度
 
         # Special token embedding
-        special_token_embedding = tf.get_variable("special_token_embedding", [3,6], tf.float32, tf.contrib.layers.xavier_initializer())
+        special_token_embedding = tf.get_variable("special_token_embedding", [3, 6], tf.float32, tf.contrib.layers.xavier_initializer())
         # Embedding_table
         # Shape: [batch_size,vocab_size,features_size]
         embedding_table = tf.concat([tf.tile(tf.expand_dims(special_token_embedding,0),[self.batch_size,1,1]), self.inputs],axis=1)
